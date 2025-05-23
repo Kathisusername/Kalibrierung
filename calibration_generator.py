@@ -159,7 +159,6 @@ def compute_voltage_means(
                 })
     return pd.DataFrame(records)
 
-    
 def fit_calibration_curves(df_all, degree=7):
     """
     Fittet pro Sensor in df_all ein Kalibrier-Polynom 
@@ -180,40 +179,14 @@ def fit_calibration_curves(df_all, degree=7):
     cal_curves = {}
     for sensor, group in df_all.groupby('sensor'):
         # Nutze jeweils nur die Daten dieses Sensors
-        tau = group['tau_signed'].values.astype(float)
-        U   = group['U_signed'].values.astype(float)
+        tau = group['tau_neg'].values.astype(float)
+        U   = group['U_mean'].values.astype(float)
         # U = f(tau) invertiertes Kalibrier-Polynom
         coeffs = np.polyfit(tau, U, degree)
         cal_curves[sensor] = np.poly1d(coeffs)
     return cal_curves
 
-
-# ---------------------
-#         MAIN
-# ---------------------
-if __name__ == "__main__":
-
-    # 1) Messinfo einlesen
-    sensors, directions, freqs, _ = get_measurement_info_from_filenames(DATA_FOLDER)
-
-    # 2) p- und U-Daten verarbeiten
-    df_press = compute_pressure_means(DATA_FOLDER, sensors, directions, freqs)
-    df_u     = compute_voltage_means(DATA_FOLDER, sensors, directions, freqs)
-
-    # 3) Zusammenführen
-    df_all = pd.merge(df_press, df_u, on=['sensor','direction','rotor_frequency'], how='inner')
-
-    # 4) "Signed"-Spalten
-    df_all['tau_signed'] = df_all.apply(
-        lambda r:  r['wandschubspannung'] if r['direction']=='1' else -r['wandschubspannung'],
-        axis=1
-    )
-    df_all['U_signed'] = df_all['U_mean']
-
-    # 5) Kalibrierkurven fitten
-    cal_curves = fit_calibration_curves(df_all, degree=7)
-
-
+def plot_example_pressure(df, sensor, direction, rotor_frequency):
     # 6) Plot der Druckgradienten am Beispiel
     example = df_all[(df_all.sensor=='ANW94') & (df_all.direction=='1') & (df_all.rotor_frequency=='45.00')]
     pos = np.arange(16) * 100.0
@@ -229,12 +202,12 @@ if __name__ == "__main__":
     plt.ylabel('Mittlerer Druck [Pa]')
     plt.title('Druckgradient ANW94, Richtung 1, 45 Hz')
     plt.legend(); plt.grid(True); plt.tight_layout(); plt.show()
-
-    # 7) Plot für jeden Sensor: Inverse Kalibrierkurve
+    
+def plot_calcurve(df_all, cal_curves, sensors):
     for s in sensors:
         grp = df_all[df_all.sensor==s]
-        tau = grp['tau_signed'].values.astype(float)
-        U   = grp['U_signed'].values.astype(float)
+        tau = grp['tau_neg'].values.astype(float)
+        U   = grp['U_mean'].values.astype(float)
         poly = cal_curves[s]
 
         tau_fit = np.linspace(tau.min(), tau.max(), 200)
@@ -247,11 +220,45 @@ if __name__ == "__main__":
         plt.ylabel('U [V]')
         plt.title(f'Inverse Kalibrierkurve Sensor {s}')
         plt.legend(); plt.grid(True); plt.tight_layout(); plt.show()
-
-    # 8) Koeffizienten speichern
+    
+def save_cal_coefs(cal_curves):
     rows = []
     for s, poly in cal_curves.items():
         coefs = poly.coefficients[::-1]  # a0...a7
         rows.append({'sensor': s, **{f'a{i}': c for i,c in enumerate(coefs)}})
     pd.DataFrame(rows).to_csv('calibration_coefficients.csv', index=False)
+    
+# ---------------------
+#         MAIN
+# ---------------------
+if __name__ == "__main__":
+
+    # 1) Messinfo einlesen
+    sensors, directions, freqs, file_types = get_measurement_info_from_filenames(DATA_FOLDER)
+
+    # 2) p- und U-Daten verarbeiten
+    df_press = compute_pressure_means(DATA_FOLDER, sensors, directions, freqs)
+    df_u     = compute_voltage_means(DATA_FOLDER, sensors, directions, freqs)
+
+    # 3) Zusammenführen
+    df_all = pd.merge(df_press, df_u, on=['sensor','direction','rotor_frequency'], how='inner')
+
+    # 4) Sensor in Position 2 -> tau_w künstlich negativ
+    df_all['tau_neg'] = df_all.apply(
+        lambda r:  r['wandschubspannung'] if r['direction']=='1' else -r['wandschubspannung'],
+        axis=1
+        )
+
+    # 5) Kalibrierkurven fitten
+    cal_curves = fit_calibration_curves(df_all, degree=7)
+
+    # 6) Beispielplot Druckgradient zur Veranschaulichung
+    plot_example_pressure(df_all, sensor='ANW65', direction='1', rotor_frequency='45.00')
+    
+    # 7) Plots der Kalibrierungskurven
+    plot_calcurve(df_all, cal_curves, sensors)
+    
+    # 8) Koeffizienten speichern
+    save_cal_coefs(cal_curves)
+
 
