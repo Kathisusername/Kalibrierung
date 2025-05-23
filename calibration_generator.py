@@ -8,24 +8,7 @@ import re
 DATA_FOLDER = './EMA2025'
 
 CHANNEL_HEIGHT = 15 # Kanalhöhe = 15 mm
-
-# Koordinaten der Drucksensoren definieren
-
-
-# Funktion: extract sensor data
-
-    # Schleife: für jede Sensornummer
-        # Schleife: für jede Druckdatei
-            # Schleife für jede Richtung
-                # Schleife: Für jede Rotorfrequenz
-                    # Spalten für Gradienten angeben
-                    # jeweils Mittelwert berechnen
-                    # Gradienten berechnen & speichern
-                    # tau_w berechnen
-                    
-        # Schleife: Für jede Spannungsdaten
-        # sensor_1_
-        
+       
         
 def get_measurement_info_from_filenames(data_folder):
     """
@@ -84,7 +67,6 @@ def calculate_druckgradient(col_means):
     return slope
 
 def calculate_wandschubspannung(dpdx, H=CHANNEL_HEIGHT):
-    # dpdx in Pa/mm, H in mm → tau_w in Pa
     return -dpdx * (H / 2.0)
 
 def compute_pressure_means(
@@ -148,7 +130,6 @@ def compute_voltage_means(
                 fpath = os.path.join(data_folder, fname)
                 if not os.path.isfile(fpath):
                     continue
-                # lade alle 8 Spalten
                 data = np.loadtxt(fpath)
                 Umean = data[:, 3].mean()
                 records.append({
@@ -181,13 +162,11 @@ def fit_calibration_curves(df_all, degree=7):
         # Nutze jeweils nur die Daten dieses Sensors
         tau = group['tau_neg'].values.astype(float)
         U   = group['U_mean'].values.astype(float)
-        # U = f(tau) invertiertes Kalibrier-Polynom
         coeffs = np.polyfit(tau, U, degree)
         cal_curves[sensor] = np.poly1d(coeffs)
     return cal_curves
 
 def plot_example_pressure(df, sensor, direction, rotor_frequency):
-    # 6) Plot der Druckgradienten am Beispiel
     example = df_all[(df_all.sensor=='ANW94') & (df_all.direction=='1') & (df_all.rotor_frequency=='45.00')]
     pos = np.arange(16) * 100.0
     pos[-1] = pos[-2] + 200.0
