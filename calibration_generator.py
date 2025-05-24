@@ -206,6 +206,36 @@ def save_cal_coefs(cal_curves):
         coefs = poly.coefficients[::-1]  # a0...a7
         rows.append({'sensor': s, **{f'a{i}': c for i,c in enumerate(coefs)}})
     pd.DataFrame(rows).to_csv('calibration_coefficients.csv', index=False)
+
+def calibration_offset(df_all, degree=7, output_file='rms_offsets.txt'):
+    """
+    Fittet pro Sensor ein Kalibrier-Polynom tau = f(U) und berechnet den RMS-Offset.
+    Speichert die Ergebnisse zusätzlich in einer TXT-Datei.
+
+    Returns:
+    --------
+    dict: sensor -> (poly1d, RMS)
+    """
+    cal_curves = {}
+    lines = []
+
+    for sensor, group in df_all.groupby('sensor'):
+        tau = group['tau_neg'].values.astype(float)
+        U   = group['U_mean'].values.astype(float)
+        # Polynomial fit: tau = f(U)
+        coeffs = np.polyfit(tau, U, degree)
+        poly = np.poly1d(coeffs)
+        # Berechnung der Fitwerte und RMS
+        U_fit = poly(tau)
+        rms_offset = np.sqrt(np.mean((U - U_fit)**2))
+        cal_curves[sensor] = (poly, rms_offset)
+        print(f"Sensor: {sensor} | RMS-Offset: {rms_offset:.5f} V")
+        lines.append(f"Sensor: {sensor} | RMS-Offset: {rms_offset:.5f} V\n")
+
+    with open(output_file, 'w') as f:
+        f.writelines(lines)
+
+    return cal_curves
     
 # ---------------------
 #         MAIN
@@ -239,5 +269,8 @@ if __name__ == "__main__":
     
     # 8) Koeffizienten speichern
     save_cal_coefs(cal_curves)
+
+    # 9) RMS-Offset ausgeben und in txt Datei speichern
+    calibration_offset(df_all, degree=7)
 
 
