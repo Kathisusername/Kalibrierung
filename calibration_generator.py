@@ -120,6 +120,7 @@ def compute_voltage_means(
     sensor_names: list,
     directions: list,
     rotor_frequencies: list
+    offsets_dict: dict = None  # Optional: manuelle Offsets
 ) -> pd.DataFrame:
     
     records = []
@@ -132,6 +133,11 @@ def compute_voltage_means(
                     continue
                 data = np.loadtxt(fpath)
                 Umean = data[:, 3].mean()
+
+                # Offset abziehen, falls vorhanden
+                if offsets_dict and sensor in offsets_dict:
+                    Umean -= offsets_dict[sensor]
+                       
                 records.append({
                     'sensor': sensor,
                     'direction': direction,
@@ -207,14 +213,14 @@ def save_cal_coefs(cal_curves):
         rows.append({'sensor': s, **{f'a{i}': c for i,c in enumerate(coefs)}})
     pd.DataFrame(rows).to_csv('calibration_coefficients.csv', index=False)
 
-def calibration_offset(df_all, degree=7, output_file='rms_offsets.txt'):
+def calibration_offset(df_all, degree=7, output_file='mse_offsets.txt'):
     """
-    Fittet pro Sensor ein Kalibrier-Polynom tau = f(U) und berechnet den RMS-Offset.
+    Fittet pro Sensor ein Kalibrier-Polynom tau = f(U) und berechnet den MSE und Offset.
     Speichert die Ergebnisse zusätzlich in einer TXT-Datei.
 
     Returns:
     --------
-    dict: sensor -> (poly1d, RMS)
+    dict: sensor -> (poly1d, MSE)
     """
     cal_curves = {}
     lines = []
@@ -227,10 +233,13 @@ def calibration_offset(df_all, degree=7, output_file='rms_offsets.txt'):
         poly = np.poly1d(coeffs)
         # Berechnung der Fitwerte und RMS
         U_fit = poly(tau)
-        rms_offset = np.sqrt(np.mean((U - U_fit)**2))
-        cal_curves[sensor] = (poly, rms_offset)
-        print(f"Sensor: {sensor} | RMS-Offset: {rms_offset:.5f} V")
-        lines.append(f"Sensor: {sensor} | RMS-Offset: {rms_offset:.5f} V\n")
+        mse = np.mean((U - U_fit)**2)
+        offset = np.mean(U-U_fit)
+        cal_curves[sensor] = (poly, mse, offset)
+        print(f"Sensor: {sensor} | MSE: {mse:.5f} V")
+        lines.append(f"Sensor: {sensor} | MSE: {mse:.5f} V\n")
+        print(f"Sensor: {sensor} | Offset: {offset:.5f} V")
+        lines.append(f"Sensor: {sensor} | Offset: {offset:.5f} V\n")
 
     with open(output_file, 'w') as f:
         f.writelines(lines)
@@ -242,12 +251,28 @@ def calibration_offset(df_all, degree=7, output_file='rms_offsets.txt'):
 # ---------------------
 if __name__ == "__main__":
 
+    # Offset definieren
+    manual_offsets = {
+        'ANW61': -0.0786,   # Im Laufe der Kalibrierung eingestellte Offsets
+        'ANW43': 0.0005,
+        'ANW49': 0.001,
+        'ANW22': 0.005,
+        'ANW110': 0.0002,
+        'ANW88': 0,
+        'ANW65': 0.035,
+        'ANW19': 0,
+        'ANW117': 0.005,
+        'ANW109': -0.005,
+        'ANW63': 0.061,
+        'ANW94': 0.001,
+    }
     # 1) Messinfo einlesen
     sensors, directions, freqs, file_types = get_measurement_info_from_filenames(DATA_FOLDER)
 
     # 2) p- und U-Daten verarbeiten
     df_press = compute_pressure_means(DATA_FOLDER, sensors, directions, freqs)
-    df_u     = compute_voltage_means(DATA_FOLDER, sensors, directions, freqs)
+    #df_u     = compute_voltage_means(DATA_FOLDER, sensors, directions, freqs)
+    df_u = compute_voltage_means(DATA_FOLDER, sensors, directions, freqs, offsets_dict=manual_offsets)
 
     # 3) Zusammenführen
     df_all = pd.merge(df_press, df_u, on=['sensor','direction','rotor_frequency'], how='inner')
