@@ -236,8 +236,8 @@ def calibration_offset(df_all, degree=7, output_file='mse_offsets.txt'):
         mse = np.mean((U - U_fit)**2)
         offset = np.mean(U-U_fit)
         cal_curves[sensor] = (poly, mse, offset)
-        print(f"Sensor: {sensor} | MSE: {mse:.5f} V")
-        lines.append(f"Sensor: {sensor} | MSE: {mse:.5f} V\n")
+        print(f"Sensor: {sensor} | MSE: {mse:.5f} V^2")
+        lines.append(f"Sensor: {sensor} | MSE: {mse:.5f} V^2\n")
         print(f"Sensor: {sensor} | Offset: {offset:.5f} V")
         lines.append(f"Sensor: {sensor} | Offset: {offset:.5f} V\n")
 
