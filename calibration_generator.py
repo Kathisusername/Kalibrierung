@@ -1,13 +1,16 @@
 import numpy as np
+from numpy.polynomial import polynomial as poly
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import re
 
+
 # am Ende dran denken den ORdner zu ändern! #
 DATA_FOLDER = './EMA2025'
 
 CHANNEL_HEIGHT = 15 # Kanalhöhe = 15 mm
+DEGREE = 7
        
         
 def get_measurement_info_from_filenames(data_folder):
@@ -62,7 +65,7 @@ def calculate_druckgradient(col_means):
     x = np.arange(n) * 100.0
     x[-1] = x[-2] + 200.0
 
-    # 1. Grades Fit: slope ist dp/dx
+    # 1. Grades Fit: slope ist Druckgradient dp/dx
     slope, _ = np.polyfit(x, y, 1)
     return slope
 
@@ -91,7 +94,7 @@ def compute_pressure_means(
                 fname = f"{sensor}-{direction}_{freq}_p.dat"
                 fpath = os.path.join(data_folder, fname)
                 if os.path.isfile(fpath):
-                    # Lade alle Spalten (16) als 2D-Array
+                    # Lade alle Spalten (16) als Array
                     data = np.loadtxt(fpath)
                     # Berechne Mittelwert jeder Spalte
                     col_means = data.mean(axis=0)
@@ -119,7 +122,7 @@ def compute_voltage_means(
     data_folder: str,
     sensor_names: list,
     directions: list,
-    rotor_frequencies: list
+    rotor_frequencies: list,
     offsets_dict: dict = None  # Optional: manuelle Offsets
 ) -> pd.DataFrame:
     
@@ -146,16 +149,16 @@ def compute_voltage_means(
                 })
     return pd.DataFrame(records)
 
-def fit_calibration_curves(df_all, degree=7):
+def fit_calibration_curves(df_all, DEGREE):
     """
     Fittet pro Sensor in df_all ein Kalibrier-Polynom 
-    tau_w = f(U) vom Grad `degree`.
+    tau_w = f(U) vom Grad `DEGREE`.
     
     Parameters
     ----------
     df_all : pd.DataFrame
         Muss die Spalten ['sensor', 'U_mean', 'wandschubspannung'] enthalten.
-    degree : int
+    DEGREE : int
         Grad des anzupassenden Polynoms (Standard 7).
     
     Returns
@@ -163,14 +166,21 @@ def fit_calibration_curves(df_all, degree=7):
     dict
         sensor -> np.poly1d, die Kalibrierfunktion τ_w(U)
     """
+    
     cal_curves = {}
     for sensor, group in df_all.groupby('sensor'):
-        # Nutze jeweils nur die Daten dieses Sensors
-        tau = group['tau_neg'].values.astype(float)
-        U   = group['U_mean'].values.astype(float)
-        coeffs = np.polyfit(tau, U, degree)
-        cal_curves[sensor] = np.poly1d(coeffs)
+        U   = group['U_mean'].to_numpy(dtype=float)
+        tau = group['tau_neg'].to_numpy(dtype=float)
+
+        # 1) Koeffizienten in „polynomial“-Basis (c0 + c1 x + ... + cN x^N)
+        coeffs = poly.polyfit(U, tau, DEGREE)
+        # 2) daraus ein Polynomial-Objekt bauen
+        P = poly.Polynomial(coeffs)
+        # 3) in unser Dict übernehmen
+        cal_curves[sensor] = P
+
     return cal_curves
+
 
 def plot_example_pressure(df, sensor, direction, rotor_frequency):
     example = df_all[(df_all.sensor=='ANW94') & (df_all.direction=='1') & (df_all.rotor_frequency=='45.00')]
@@ -190,30 +200,40 @@ def plot_example_pressure(df, sensor, direction, rotor_frequency):
     
 def plot_calcurve(df_all, cal_curves, sensors):
     for s in sensors:
-        grp = df_all[df_all.sensor==s]
-        tau = grp['tau_neg'].values.astype(float)
+        grp = df_all[df_all.sensor == s]
         U   = grp['U_mean'].values.astype(float)
-        poly = cal_curves[s]
+        tau = grp['tau_neg'].values.astype(float)
+        P   = cal_curves[s]
 
-        tau_fit = np.linspace(tau.min(), tau.max(), 200)
-        U_fit   = poly(tau_fit)
+        U_fit   = np.linspace(U.min(), U.max(), 200)
+        tau_fit = P(U_fit)
 
         plt.figure(figsize=(7,5))
-        plt.scatter(tau, U, label='Messwerte')
-        plt.plot(tau_fit, U_fit, '-', lw=2, label=f'{7}. Grades-Fit')
-        plt.xlabel('τ_w [Pa]')
-        plt.ylabel('U [V]')
-        plt.title(f'Inverse Kalibrierkurve Sensor {s}')
-        plt.legend(); plt.grid(True); plt.tight_layout(); plt.show()
-    
-def save_cal_coefs(cal_curves):
-    rows = []
-    for s, poly in cal_curves.items():
-        coefs = poly.coefficients[::-1]  # a0...a7
-        rows.append({'sensor': s, **{f'a{i}': c for i,c in enumerate(coefs)}})
-    pd.DataFrame(rows).to_csv('calibration_coefficients.csv', index=False)
+        plt.scatter(U, tau, label='Messwerte', zorder=5)
+        plt.plot(U_fit, tau_fit, '-', lw=2, label=f'Fit {DEGREE}. Grades')
+        plt.xlabel('Sensorspannung U[V]')
+        plt.ylabel('Wandschubspannung $\\tau_w$ [Pa]')
+        plt.title(f'Kalibrierkurve Sensor {s}')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()   
 
-def calibration_offset(df_all, degree=7, output_file='mse_offsets.txt'):
+def save_cal_coefs(cal_curves, output_file='calibration_coefficients.csv'):
+    rows = []
+    for sensor, P in cal_curves.items():
+        # P.coef ist ein Array [c0, c1, ..., c_DEGREE]
+        coeffs = P.coef  
+        row = {'sensor': sensor}
+        for i, ci in enumerate(coeffs):
+            row[f'a{i}'] = ci
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df.to_csv(output_file, index=False)
+    print(f"Calibration coefficients saved to {output_file}")
+
+def calibration_offset(df_all, DEGREE, output_file='mse_offsets.txt'):
     """
     Fittet pro Sensor ein Kalibrier-Polynom tau = f(U) und berechnet den MSE und Offset.
     Speichert die Ergebnisse zusätzlich in einer TXT-Datei.
@@ -229,7 +249,7 @@ def calibration_offset(df_all, degree=7, output_file='mse_offsets.txt'):
         tau = group['tau_neg'].values.astype(float)
         U   = group['U_mean'].values.astype(float)
         # Polynomial fit: tau = f(U)
-        coeffs = np.polyfit(tau, U, degree)
+        coeffs = np.polyfit(tau, U, DEGREE)
         poly = np.poly1d(coeffs)
         # Berechnung der Fitwerte und RMS
         U_fit = poly(tau)
@@ -266,6 +286,7 @@ if __name__ == "__main__":
         'ANW63': 0.061,
         'ANW94': 0.001,
     }
+    
     # 1) Messinfo einlesen
     sensors, directions, freqs, file_types = get_measurement_info_from_filenames(DATA_FOLDER)
 
@@ -284,18 +305,21 @@ if __name__ == "__main__":
         )
 
     # 5) Kalibrierkurven fitten
-    cal_curves = fit_calibration_curves(df_all, degree=7)
+    cal_curves = fit_calibration_curves(df_all, DEGREE)
+
 
     # 6) Beispielplot Druckgradient zur Veranschaulichung
     plot_example_pressure(df_all, sensor='ANW65', direction='1', rotor_frequency='45.00')
     
     # 7) Plots der Kalibrierungskurven
+    sensors = sorted(df_all['sensor'].unique())
     plot_calcurve(df_all, cal_curves, sensors)
+
     
     # 8) Koeffizienten speichern
     save_cal_coefs(cal_curves)
 
     # 9) RMS-Offset ausgeben und in txt Datei speichern
-    calibration_offset(df_all, degree=7)
+    calibration_offset(df_all, DEGREE)
 
 
