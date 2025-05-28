@@ -265,6 +265,78 @@ def calibration_offset(df_all, DEGREE, output_file='mse_offsets.txt'):
         f.writelines(lines)
 
     return cal_curves
+
+
+def plot_mse_vs_degree(
+    df_all,
+    tau_col='tau_neg',
+    U_col='U_mean',
+    degree_range=None,
+    exclude_sensors=None,
+    smooth_window: int = 5
+):
+    """
+    Berechnet für jeden Sensor (außer den in `exclude_sensors`) und jeden Grad in `degree_range` den MSE
+    zwischen den Messwerten (tau_col, U_col) und dem Polynomfit.
+    Plottet anschließend MSE vs. Polynomgrad für alle übrigen Sensoren.
+
+    Parameters
+    ----------
+    df_all : pd.DataFrame
+        Muss Spalten ['sensor', tau_col, U_col] enthalten.
+    tau_col : str
+        Name der Spalte mit tau_w.
+    U_col : str
+        Name der Spalte mit Sensorspannung U.
+    degree_range : iterable of int, optional
+        Liste oder Range der getesteten Polynomegrade (Standard 1–10).
+    exclude_sensors : iterable of str, optional
+        Sensoren, die nicht geplottet werden sollen (Standard ['ANW89','ANW94']). <- defekte Sensoren
+    """
+    if degree_range is None:
+        degree_range = range(1, 11)
+    if exclude_sensors is None:
+        exclude_sensors = ['ANW89', 'ANW94']
+
+    # alle Sensoren, minus die Ausgeschlossenen
+    sensors = [s for s in sorted(df_all['sensor'].unique())
+               if s not in exclude_sensors]
+
+    # MSE für jeden Sensor und jedes Polynomgrad sammeln
+    mse_dict = {s: [] for s in sensors}
+    for s in sensors:
+        grp = df_all[df_all['sensor'] == s]
+        tau = grp[tau_col].values.astype(float)
+        U   = grp[U_col].values.astype(float)
+
+        for deg in degree_range:
+            coeffs = np.polyfit(tau, U, deg)
+            U_pred = np.polyval(coeffs, tau)
+            mse = np.mean((U - U_pred) ** 2)
+            mse_dict[s].append(mse)
+
+    # Plot
+    plt.figure(figsize=(10, 6))
+    degs = np.array(list(degree_range))
+    for s, mses in mse_dict.items():
+        # glätten
+        mses_smooth = pd.Series(mses).rolling(
+            window=smooth_window,
+            center=True,
+            min_periods=1
+        ).mean().values
+        plt.plot(degs, mses_smooth, marker='o', label=s)
+
+    plt.xlabel('Polynomgrad')
+    plt.ylabel('MSE [V²]')
+    plt.title('MSE vs. Polynomgrad (ohne ANW89 & ANW94)')
+    plt.xticks(list(degree_range))
+    plt.grid(True)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
+    plt.tight_layout()
+    plt.show()
+    
+    
     
 # ---------------------
 #         MAIN
@@ -323,3 +395,4 @@ if __name__ == "__main__":
     calibration_offset(df_all, DEGREE)
 
 
+    plot_mse_vs_degree(df_all, smooth_window=5)
