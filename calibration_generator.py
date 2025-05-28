@@ -266,7 +266,6 @@ def calibration_offset(df_all, DEGREE, output_file='mse_offsets.txt'):
 
     return cal_curves
 
-
 def plot_mse_vs_degree(
     df_all,
     tau_col='tau_neg',
@@ -329,15 +328,14 @@ def plot_mse_vs_degree(
 
     plt.xlabel('Polynomgrad')
     plt.ylabel('MSE [V²]')
-    plt.title('MSE vs. Polynomgrad (ohne ANW89 & ANW94)')
+    plt.title('MSE pro Polynomgrad (ohne ANW89 & ANW94)')
     plt.xticks(list(degree_range))
     plt.grid(True)
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
     plt.tight_layout()
     plt.show()
     
-    
-    
+  
 # ---------------------
 #         MAIN
 # ---------------------
@@ -394,5 +392,5 @@ if __name__ == "__main__":
     # 9) RMS-Offset ausgeben und in txt Datei speichern
     calibration_offset(df_all, DEGREE)
 
-
+    #10) MSE über Polynomgrad plotten (Abweichung des Polynomfits von den Daten)
     plot_mse_vs_degree(df_all, smooth_window=5)
