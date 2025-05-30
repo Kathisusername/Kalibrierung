@@ -151,37 +151,31 @@ def compute_voltage_means(
 def fit_calibration_curves(df_all, DEGREE):
     """
     Fittet pro Sensor in df_all ein Kalibrier-Polynom 
-    tau_w = f(U) vom Grad `DEGREE` und berechnet MSE & Offset.
-
+    tau_w = f(U) vom Grad DEGREE.
+    
+    Parameters
+    ----------
+    df_all : pd.DataFrame
+        Muss die Spalten ['sensor', 'U_mean', 'wandschubspannung'] enthalten.
+    DEGREE : int
+        Grad des anzupassenden Polynoms (Standard 7).
+    
     Returns
     -------
     dict
-        sensor -> {
-            'poly':   Polynomial-Objekt P mit P(U)=tau_w,
-            'mse':    mittlerer quadratischer Fehler zwischen tau_neg und P(U),
-            'offset': mittlerer Fehler (tau_neg − P(U))
-        }
+        sensor -> poly.polynomial, die Kalibrierfunktion τ_w(U)
     """
+    
     cal_curves = {}
     for sensor, group in df_all.groupby('sensor'):
         U   = group['U_mean'].to_numpy(dtype=float)
         tau = group['tau_neg'].to_numpy(dtype=float)
 
-        # 1) Fit Koeffizienten in „polynomial“-Basis
+        # 1) Koeffizienten in „polynomial“-Basis (c0 + c1 x + ... + cN x^N)
         coeffs = poly.polyfit(U, tau, DEGREE)
         # 2) daraus ein Polynomial-Objekt bauen
         P = poly.Polynomial(coeffs)
 
-        tau_fit = P(U)
-        mse = np.mean((tau-tau_fit)**2)
-        offset = np.mean(tau-tau_fit)
-        
-        cal_curves[sensor] = {
-            'poly': P,
-            'mse': mse,
-            'offset': offset
-        }
-        print(f"Sensor {sensor}: MSE={mse:.3e}, Offset={offset:.3e}")
         # 3) in unser Dict übernehmen
         cal_curves[sensor] = P
 
@@ -222,21 +216,60 @@ def plot_calcurve(df_all, cal_curves, sensors):
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
-        plt.show()   
+        plt.show() 
 
-def save_cal_coefs(cal_curves, output_file='calibration_coefficients.csv'):
-    rows = []
+def save_cal_coefs(cal_curves):
+    """
+    Schreibt pro Sensor eine Datei 'coefs_sensor_<sensor>.txt' mit den 
+    Fit-Koeffizienten (c0 … cN) als Tab-separierte Werte im aktuellen
+    Arbeitsverzeichnis.
+
+    Erwartet:
+      cal_curves[sensor] = np.polynomial.polynomial.Polynomial
+    """
     for sensor, P in cal_curves.items():
-        # P.coef ist ein Array [c0, c1, ..., c_DEGREE]
-        coeffs = P.coef  
-        row = {'sensor': sensor}
-        for i, ci in enumerate(coeffs):
-            row[f'a{i}'] = ci
-        rows.append(row)
+        coeffs   = P.coef  # Array [c0, c1, …, cN]
+        filename = f'coefs_sensor_{sensor}.txt'
 
-    df = pd.DataFrame(rows)
-    df.to_csv(output_file, index=False)
-    print(f"Calibration coefficients saved to {output_file}")
+        with open(filename, 'w') as f:
+            # Tab-separiert, gleiche Präzision wie dein Loader erwartet
+            f.write('\t'.join(f'{c:.18g}' for c in coeffs))
+
+    print(f"Coefficients for {len(cal_curves)} sensors written in current directory")
+
+
+def calibration_offset(df_all, DEGREE, output_file='mse_offsets.txt'):
+    """
+    Fittet pro Sensor ein Kalibrier-Polynom tau = f(U) und berechnet den MSE und Offset.
+    Speichert die Ergebnisse zusätzlich in einer TXT-Datei.
+
+    Returns:
+    --------
+    dict: sensor -> (poly1d, MSE)
+    """
+    cal_curves = {}
+    lines = []
+
+    for sensor, group in df_all.groupby('sensor'):
+        tau = group['tau_neg'].values.astype(float)
+        U   = group['U_mean'].values.astype(float)
+        # Polynomial fit: tau = f(U)
+        coeffs = np.polyfit(tau, U, DEGREE)
+        poly = np.poly1d(coeffs)
+        # Berechnung der Fitwerte und RMS
+        U_fit = poly(tau)
+        mse = np.mean((U - U_fit)**2)
+        offset = np.mean(U-U_fit)
+        cal_curves[sensor] = (poly, mse, offset)
+        print(f"Sensor: {sensor} | MSE: {mse:.5f} V^2")
+        lines.append(f"Sensor: {sensor} | MSE: {mse:.5f} V^2\n")
+        print(f"Sensor: {sensor} | Offset: {offset:.5f} V")
+        lines.append(f"Sensor: {sensor} | Offset: {offset:.5f} V\n")
+
+    with open(output_file, 'w') as f:
+        f.writelines(lines)
+
+    return cal_curves
 
 def plot_mse_vs_degree(
     df_all,
@@ -361,6 +394,8 @@ if __name__ == "__main__":
     # 8) Koeffizienten speichern
     save_cal_coefs(cal_curves)
 
+    # 9) RMS-Offset ausgeben und in txt Datei speichern
+    calibration_offset(df_all, DEGREE)
 
     #10) MSE über Polynomgrad plotten (Abweichung des Polynomfits von den Daten)
     plot_mse_vs_degree(df_all, smooth_window=5)
