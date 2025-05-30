@@ -218,25 +218,6 @@ def plot_calcurve(df_all, cal_curves, sensors):
         plt.tight_layout()
         plt.show() 
 
-def save_cal_coefs(cal_curves):
-    """
-    Schreibt pro Sensor eine Datei 'coefs_sensor_<sensor>.txt' mit den 
-    Fit-Koeffizienten (c0 … cN) als Tab-separierte Werte im aktuellen
-    Arbeitsverzeichnis.
-
-    Erwartet:
-      cal_curves[sensor] = np.polynomial.polynomial.Polynomial
-    """
-    for sensor, P in cal_curves.items():
-        coeffs   = P.coef  # Array [c0, c1, …, cN]
-        filename = f'coefs_sensor_{sensor}.txt'
-
-        with open(filename, 'w') as f:
-            # Tab-separiert, gleiche Präzision wie dein Loader erwartet
-            f.write('\t'.join(f'{c:.18g}' for c in coeffs))
-
-    print(f"Coefficients for {len(cal_curves)} sensors written in current directory")
-
 
 def calibration_offset(df_all, DEGREE, output_file='mse_offsets.txt'):
     """
@@ -340,7 +321,27 @@ def plot_mse_vs_degree(
     plt.tight_layout()
     plt.show()
     
-  
+def save_cal_coefs(cal_curves):
+    """
+    Schreibt pro Sensor eine Datei 'coefs_sensor_<sensor_number>.txt' mit den 
+    Fit-Koeffizienten (c0 … cN) als Tab-separierte Werte in ./coefs/.
+
+    Erwartet:
+      cal_curves[sensor] = np.polynomial.polynomial.Polynomial, wobei
+      sensor z.B. 'ANW49' ist.
+    """
+    # Sicherstellen, dass der Ordner 'coefs' existiert
+    os.makedirs('coefs', exist_ok=True)
+
+    for sensor, P in cal_curves.items():
+        coeffs = P.coef  # Array [c0, c1, …, cN]
+        # 'ANW' entfernen, falls vorhanden
+        sensor_id = sensor[3:] if sensor.startswith('ANW') else sensor
+        filename  = os.path.join('coefs', f'coefs_sensor_{sensor_id}.txt')
+
+        with open(filename, 'w') as f:
+            f.write('\t'.join(f'{c:.18g}' for c in coeffs))
+    
 # ---------------------
 #         MAIN
 # ---------------------
@@ -390,12 +391,11 @@ if __name__ == "__main__":
     sensors = sorted(df_all['sensor'].unique())
     plot_calcurve(df_all, cal_curves, sensors)
 
-    
-    # 8) Koeffizienten speichern
-    save_cal_coefs(cal_curves)
-
-    # 9) RMS-Offset ausgeben und in txt Datei speichern
+    # 8) RMS-Offset ausgeben und in txt Datei speichern
     calibration_offset(df_all, DEGREE)
 
-    #10) MSE über Polynomgrad plotten (Abweichung des Polynomfits von den Daten)
+    #9) MSE über Polynomgrad plotten (Abweichung des Polynomfits von den Daten)
     plot_mse_vs_degree(df_all, smooth_window=5)
+    
+    # 10) Koeffizienten speichern
+    save_cal_coefs(cal_curves)
